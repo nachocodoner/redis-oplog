@@ -52,8 +52,21 @@ Configure it via Meteor settings:
 }
 ```
 
-To see what you can configure under `"redis": {}` take a look here:
-https://github.com/redis/node-redis/blob/HEAD/docs/client-configuration.md
+The `redis` settings go to node-redis 3.1.2. The package, two-process browser and Meteor core observer tests have passed locally on Meteor 3.6.1 with standalone Redis server 8.12.0. [Client configuration options](https://github.com/redis/node-redis/tree/v3.1.2#options-object-properties) · [Compatibility evidence](docs/reactivity-audit.md#meteor-361-observer-compatibility)
+
+To connect over IPv6, put the URL in `redis.url`. An IPv6 literal needs brackets in a URL.
+
+```json
+{
+  "redisOplog": {
+    "redis": { "url": "redis://[::1]:6379/0" }
+  }
+}
+```
+
+For separate options, use `{ "host": "::1", "port": 6379 }`. To request IPv6 DNS resolution for a hostname, set `"family": "IPv6"` alongside `host`. If a provider supplies `REDIS_URL`, pass its value as `redis.url` during initialization. The package's own environment setting is `REDIS_OPLOG_SETTINGS`, which takes JSON such as `{"redis":{"url":"redis://[::1]:6379/0"}}`. [Server initialization](redis-oplog.js) · [Pinned client's address-family handling](https://github.com/redis/node-redis/blob/v3.1.2/index.js)
+
+For a TLS endpoint, use `rediss://` and a certificate that Node trusts for the hostname or IP in the URL. The package suite also passed over TLS on IPv6 loopback with a local test CA. [Client URL parser](https://github.com/redis/node-redis/blob/v3.1.2/lib/createClient.js) · [IPv6 test results](docs/reactivity-audit.md#matched-upserts-skip-only-windows-and-ipv6)
 
 ```bash
 meteor run --settings settings.json
@@ -61,7 +74,7 @@ meteor run --settings settings.json
 
 ## Notes
 
-RedisOplog is fully backwards compatible, so there won't be any change in how you use Meteor, unless you want to fine-tune your application for absolute performance.
+When upgrading from 3.0.1, check server-side `observeChanges` callbacks. Read the ID from the first argument to `added(id, fields)`. The `removed(id)` callback receives one argument. If you need the previous document, use `observe({ removed(oldDoc) { ... } })`. Each ordinary handle can edit its callback fields independently and sees the Meteor environment in which it registered.
 
 To make sure it is compatible with other packages which extend the `Mongo.Collection` methods, make sure you go to `.meteor/packages`
 and put `cultofcoders:redis-oplog` as the first option.

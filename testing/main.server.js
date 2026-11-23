@@ -5,6 +5,8 @@ import '../lib/cache/testing';
 import '../lib/processors/testing';
 import '../lib/redis/testing';
 import './initial_add';
+import './sorted_observers.server';
+import './upsert_observers.server';
 import './collection_hooks.server';
 import './observe_callbacks.server';
 // import './mutation_callbacks';

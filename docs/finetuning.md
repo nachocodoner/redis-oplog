@@ -81,6 +81,8 @@ Note: Even if you use `namespace`, making a change to an `_id` from Users will s
 }
 ```
 
+For a cursor with a positive `skip` and no limit, each persistent notification delivered to the observer triggers a Mongo query for the IDs in its current window. Even removing a skipped row can move another row out of view. Large windows increase the number of IDs read per notification. Use an explicit sort with a unique tie-breaker such as `_id` when the application needs repeatable membership.
+
 ### Allowed Options For Mutations
 
 ```
@@ -211,6 +213,8 @@ or you want to fine-tune redis-oplog with in a non-instrusive way inside your ex
 
 `shouldIncludePrevDocument` Allows you to enable passing through the previous document through the redis event messages. The default value for
 `shouldIncludePrevDocument` is `false` but it can be enabled for each collection where you might need the previous document state on receiving updates
+
+Matched upserts follow the ordinary update payload settings. With race protection enabled, the default update payload contains the ID. Enable `shouldIncludePrevDocument` to receive the previous document. With `protectAgainstRaceConditions: false`, the update payload carries the current document. Applications reading raw Redis events from 3.0.1 may have received extra fields from matched upserts under the default configuration.
 
 Example:
 For a collection with `shouldIncludePrevDocument: false` the payload 'd' (document) field will contain only the document id after an update

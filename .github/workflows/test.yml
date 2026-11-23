@@ -4,20 +4,59 @@ on: [pull_request]
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         meteor: ["3.1.2", "3.2"]
         redis-version: [4, 5, 6, 7]
+        include:
+          - meteor: "3.6.1"
+            redis-version: "8.12.0"
+            runner: ubuntu-22.04
+            archive-sha256: b0100a879b2d45dc97d8fda941127609d648f8913008db1b65a2f72a8ae36c8b
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Start Redis
+        if: ${{ !matrix.archive-sha256 }}
         uses: supercharge/redis-github-action@1.5.0
         with:
           redis-version: ${{ matrix.redis-version }}
+
+      - name: Build and start the pinned Redis release
+        if: matrix.archive-sha256
+        working-directory: ${{ runner.temp }}
+        env:
+          REDIS_VERSION: ${{ matrix.redis-version }}
+          ARCHIVE_SHA256: ${{ matrix.archive-sha256 }}
+        run: |
+          archive="redis-$REDIS_VERSION.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" "https://download.redis.io/releases/$archive"
+          echo "$ARCHIVE_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive"
+          make -C "redis-$REDIS_VERSION/src" -j2 BUILD_TLS=no MALLOC=libc redis-server redis-cli
+          bin="$RUNNER_TEMP/redis-$REDIS_VERSION/src"
+          echo "$bin" >> "$GITHUB_PATH"
+          port=18675
+          echo "REDIS_OPLOG_TEST_URL=redis://[::1]:$port/0" >> "$GITHUB_ENV"
+          "$bin/redis-server" --bind ::1 --port "$port" --save '' --appendonly no --daemonize yes --logfile "$RUNNER_TEMP/redis.log"
+          for _ in {1..30}; do
+            if "$bin/redis-cli" -h ::1 -p "$port" PING | grep -qx PONG; then break; fi
+            sleep 1
+          done
+          "$bin/redis-cli" -h ::1 -p "$port" INFO server | tr -d '\r' | grep -Fx "redis_version:$REDIS_VERSION"
+
+      - name: Check out Meteor's observer tests
+        if: matrix.archive-sha256
+        uses: actions/checkout@v4
+        with:
+          repository: meteor/meteor
+          ref: eaf134973529396b660078b705b9fa50a4747fd5
+          path: meteor-core
+          sparse-checkout: packages/mongo
+          persist-credentials: false
 
       - name: Setup Meteor
         uses: meteorengineer/setup-meteor@v2
@@ -28,6 +67,29 @@ jobs:
           meteor create --release ${{ matrix.meteor }} --bare test
           cd test
           meteor npm i --save puppeteer@1.18.1 simpl-schema@3.4.6 chai@4.3.6
-      - name: Test
+      - name: Verify the pinned Chromium executable
+        if: matrix.archive-sha256
         working-directory: ./test
-        run: METEOR_PACKAGE_DIRS="../" TEST_BROWSER_DRIVER=puppeteer meteor test-packages --raw-logs --once --driver-package meteortesting:mocha --release ${{ matrix.meteor }} ../
+        run: |
+          chromium=$(meteor node -p 'require("puppeteer").executablePath()')
+          if [ ! -x "$chromium" ]; then meteor node node_modules/puppeteer/install.js; fi
+          test -x "$chromium"
+      - name: Test
+        timeout-minutes: 20
+        working-directory: ./test
+        shell: bash
+        env:
+          METEOR_PACKAGE_DIRS: "../"
+          TEST_BROWSER_DRIVER: puppeteer
+        run: |
+          log="$RUNNER_TEMP/package-tests.log"
+          meteor test-packages --raw-logs --once --driver-package meteortesting:mocha --release ${{ matrix.meteor }} ../ | tee "$log"
+          test "$(grep -Ec '[1-9][0-9]* passing' "$log")" -eq 2
+          grep -Fx 'SERVER FAILURES: 0' "$log"
+          grep -Fx 'CLIENT FAILURES: 0' "$log"
+      - name: Check two-process delivery and upstream observer behavior
+        if: matrix.archive-sha256
+        working-directory: ./test
+        run: |
+          meteor node ../testing/cross-instance/run.cjs
+          meteor node ../testing/cross-instance/run.cjs --core-parity ../meteor-core

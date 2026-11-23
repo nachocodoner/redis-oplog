@@ -1,59 +1,45 @@
-import {assert} from 'chai';
-import {_} from 'meteor/underscore';
+import { assert } from 'chai';
+import { Mongo } from 'meteor/mongo';
 
-// TODO: collection-hooks is not migrated yet, there's a PR going on: https://github.com/Meteor-Community-Packages/meteor-collection-hooks/pull/309
-describe.skip('It should work with collection:hooks', function () {
-    const opts = [
-        {},
-        { channel: 'xxx' },
-        { namespace: 'xxx' }
-    ];
+describe('Collection hooks and Redis observers', function () {
+    for (const [route, options] of [
+        ['collection', {}],
+        ['channel', { channel: 'hooks-channel' }],
+        ['namespace', { namespace: 'hooks-namespace' }],
+    ]) {
+        const collection = new Mongo.Collection('test_redis_collection_hooks_' + route);
 
-    let idx = 1;
-
-    opts.forEach(options => {
-        const Collection = new Mongo.Collection('test_redis_collection_hooks_' + idx++);
-
-        it('Should detect all types of changes: ' + JSON.stringify(options), async function (done) {
-            await Collection.removeAsync({});
-
-            let updates = {
-                'before.insert': false,
-                'after.insert': false,
-                'before.update': false,
-                'after.update': false,
-                'before.remove': false,
-                'after.remove': false
-            };
-
-            Collection.before.insert(function () {
-                updates['before.insert'] = true;
+        it('runs each CRUD hook once and delivers changes on the ' + route + ' route', async function () {
+            await collection.removeAsync({}, options);
+            const calls = [];
+            const hooks = [];
+            const events = [];
+            const handle = await collection.find({}, options).observeChanges({
+                added(id, fields) { events.push(['added', id, fields]); },
+                changed(id, fields) { events.push(['changed', id, fields]); },
+                removed(id) { events.push(['removed', id]); },
             });
-            Collection.after.insert(function () {
-                updates['after.insert'] = true;
-            });
-            Collection.before.update(function () {
-                updates['before.update'] = true;
-            });
-            Collection.after.update(function () {
-                updates['after.update'] = true;
-            });
-            Collection.before.remove(function () {
-                updates['before.remove'] = true;
-            });
-            Collection.after.remove(function () {
-                updates['after.remove'] = true;
-            });
-
-            const id = await Collection.insertAsync({ someData: true });
-            await Collection.updateAsync(id, { someData: false });
-            await Collection.removeAsync(id);
-
-            _.each(updates, (value, key) => {
-                assert.isTrue(value, key);
-            })
-
-            done();
-        })
-    })
+            try {
+                for (const operation of ['insert', 'update', 'remove']) {
+                    for (const timing of ['before', 'after']) {
+                        hooks.push(collection[timing][operation](() => { calls.push(timing + '.' + operation); }));
+                    }
+                }
+                const writeOptions = { ...options, optimistic: true };
+                const id = await collection.insertAsync({ someData: true }, writeOptions);
+                await collection.updateAsync(id, { $set: { someData: false } }, writeOptions);
+                await collection.removeAsync(id, writeOptions);
+                assert.deepEqual(calls, [
+                    'before.insert', 'after.insert', 'before.update', 'after.update', 'before.remove', 'after.remove',
+                ]);
+                assert.deepEqual(events, [
+                    ['added', id, { someData: true }], ['changed', id, { someData: false }], ['removed', id],
+                ]);
+            } finally {
+                await handle.stop();
+                for (const hook of hooks) hook.remove();
+                await collection.removeAsync({}, options);
+            }
+        });
+    }
 });
