@@ -16,16 +16,17 @@ Items.allow({
     remove: () => true,
 });
 
-// Meteor.publishComposite.enableDebugLogging();
-
 Meteor.methods({
-    'optimistic_ui.items.insert'(...args) {
-        return Items.insert(...args, { optimistic: true });
+    'optimistic_ui.items.insert'(doc) {
+        if (Meteor.isClient) return Items.insert(doc);
+        return Items.insert(doc, { optimistic: true });
     },
-    'optimistic_ui.items.update'(...args) {
-        return Items.update(...args, { optimistic: true });
+    'optimistic_ui.items.update'(selector, modifier) {
+        if (Meteor.isClient) return Items.update(selector, modifier);
+        return Items.update(selector, modifier, { optimistic: true });
     },
-    'optimistic_ui.items.remove'(...args) {
-        return Items.remove(...args, { optimistic: true });
+    'optimistic_ui.items.remove'(selector) {
+        if (Meteor.isClient) return Items.remove(selector);
+        return Items.remove(selector, { optimistic: true });
     },
 });

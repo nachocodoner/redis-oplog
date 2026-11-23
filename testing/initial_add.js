@@ -31,4 +31,21 @@ describe('Initial Add', function () {
       await InitialAddCollection.removeAsync({ _id: lastDocId });
     });
   });
+
+  it('keeps a live query when a new handle joins just before its last handle stops', async function () {
+    const id = await InitialAddCollection.insertAsync({ number: 42 });
+    const cursor = InitialAddCollection.find(id);
+    const first = await cursor.observeChanges({ added() {} });
+    let replacement;
+    try {
+      const added = [];
+      const joining = cursor.observeChanges({ added(docId) { added.push(docId); } });
+      [replacement] = await Promise.all([joining, first.stop()]);
+      assert.deepEqual(added, [id]);
+    } finally {
+      if (replacement) await replacement.stop();
+      await first.stop();
+      await InitialAddCollection.removeAsync(id);
+    }
+  });
 });

@@ -1,29 +1,27 @@
-## Configuration
+## Listener events
 
-You have access to the following events:
-- end
-- connect
-- reconnect
-- error
+Configure listener callbacks through `Config.redisExtras.events`. The package supports `connect`, `reconnecting`, `error` and `end`.
 
-They are documented inside the redis package:
-https://www.npmjs.com/package/redis#connection-and-other-events
-
-In order to configure these events, you can do it like this:
+`connect` runs after node-redis reports ready and Redis Oplog has finished reconciling active observers from MongoDB. With the default node-redis 3 resubscription behavior, the broker has acknowledged the remembered subscriptions at that point. This callback can run later than in 3.0.1. A socket that disconnects before reaching ready does not produce a package connect callback. For the underlying socket event, attach a listener to `getRedisListener().on("connect", handler)` after package initialization.
 
 ```js
-// in a server-side file that is loaded on startup
 import { Config } from 'meteor/cultofcoders:redis-oplog';
 
 Object.assign(Config.redisExtras.events, {
-    reconnect({delay, attempt, error}) {
-        // put your logic here. 
+    reconnecting({ delay, attempt }) {
+        console.log('Redis listener retry', attempt, delay);
     },
-    connect(err) {
-        // put your logic here
+    connect() {
+        console.log('Redis listener ready and observers refreshed');
     },
-})
+});
 ```
+
+## Observer startup
+
+An observer that opens a new Redis channel waits for its SUBSCRIBE acknowledgement before reading MongoDB. An unavailable broker can therefore delay subscription readiness, and a rejected subscription command fails the observation. Equivalent queries share startup. Notifications received during the initial read are applied in order as the observer becomes live.
+
+Redis Pub/Sub has no replay. Reconciliation can restore changes persisted in MongoDB. A synthetic notification sent while the listener was offline can be lost. Keep automatic resubscription enabled for this recovery behavior.
 
 ## Notes
 

@@ -4,8 +4,8 @@ import { _ } from 'meteor/underscore';
 
 if (Meteor.isServer) {
     RedisOplog.init({
-        redis: {
-            port: 6379, // Redis port
+        redis: process.env.REDIS_OPLOG_TEST_URL ? { url: process.env.REDIS_OPLOG_TEST_URL } : {
+            port: Number(process.env.REDIS_OPLOG_TEST_PORT || 6379),
             host: '127.0.0.1', // Redis host
         },
         // overridePublishFunction: true
